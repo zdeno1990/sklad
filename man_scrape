@@ -1,0 +1,121 @@
+import re
+import pandas
+import numpy
+import requests
+import csv
+import unicodedata
+import matplotlib.pyplot as plt
+from bs4 import BeautifulSoup as BS
+
+def page_load(page):
+    source = requests.get(page).text
+    soup = BS(source,'lxml')
+
+    return soup
+
+def split_col(df,col,sep=','):
+    new_cols = []
+    num_col = 1
+    for i in range(1,len(df[col].str.split(sep,expand=True).columns)+1):
+        new_cols.append(str(col)+' '+str(num_col))
+        num_col += 1
+
+    return new_cols
+
+def unique_val(df,lst,col,sep=','):
+    df[split_col(df,col)] = df[col].str.split(sep,expand=True)
+    df = df.apply(lambda x: x.str.strip())
+    unique = pandas.unique(df[lst].values.ravel('K'))
+    unique = numpy.array(unique).tolist()
+    unique = [i for i in unique if i != None and i != '']
+
+    return unique
+
+def make_dct(lst,lst2,df,arg1,arg2,arg3):
+    dct = {}
+
+    for i,v in enumerate(lst):
+        dct[lst[i]] = df.loc[(df[arg1].str.contains(lst2)) & (df[arg2].str.contains(lst[i]))].count()[arg3]
+
+    return dct
+
+
+def strip_accents(s):
+    s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+
+    return s.replace(' ','_')
+
+
+csv_file = open('manpowergroup_work_positions.csv','w')
+csv_writer = csv.writer(csv_file)
+csv_writer.writerow(['Pozice','Popis','Kraj','Obor','Úvazek'])
+
+i=0
+url = f'https://www.manpower.cz/manpower/cs/hledam-praci/?of=1&id={str(i)}&tu=#vysledky'
+while True:
+    i = i+1
+    page = requests.get(url)
+    url = f'https://www.manpower.cz/manpower/cs/hledam-praci/?of=1&id={str(i)}&tu=#vysledky'
+    soup = page_load(url)
+    if bool(soup.find('div',class_='ovalposition2')) == False:
+
+        break
+
+    else:
+
+        for ad in soup.find_all('div',class_='ovalposition2'):
+
+            ad_position = ad.h2.text
+
+            ad_txt = ad.p.text
+
+            info = ad.find('p',class_='spodni_lista_inzeratu').text
+
+            info = info.split('\xa0')
+
+            new_info = [i for i in info if i!='']
+
+            csv_writer.writerow([ad_position,ad_txt,new_info[0],new_info[1],new_info[2]])
+
+csv_file.close()
+
+df = pandas.read_csv('manpowergroup_work_positions.csv')
+
+kraje = unique_val(df,split_col(df,'Kraj'),'Kraj')
+
+obory = unique_val(df,split_col(df,'Obor'),'Obor')
+
+ponuky_kraje = {}
+
+for index,value in enumerate(kraje):
+     ponuky_kraje[kraje[index]] = df.loc[df['Kraj'].str.contains(kraje[index])].count()['Popis']
+
+plt.barh(*zip(*ponuky_kraje.items()),color='y')
+plt.title('Ponuky v krajoch ČR')
+
+plt.ylabel('Kraje')
+plt.xlabel('Ponuky')
+plt.grid(True)
+plt.show()
+
+
+kraje_val = {}
+dct_keys = []
+
+for i in kraje:
+    dct_keys.append(strip_accents(i))
+
+for i,v in enumerate(kraje):
+    kraje_val[dct_keys[i]] = make_dct(obory,kraje[i],df,'Kraj','Obor','Pozice')
+
+i = 1
+for k,v in kraje_val.items():
+
+    plt.barh(*zip(*kraje_val[k].items()),color='r')
+    plt.title(k)
+
+    plt.ylabel('Kraje')
+    plt.xlabel('Ponuky')
+    plt.grid(True)
+    plt.savefig(f'plot{i}.png',dpi=1000)
+    i += 1
